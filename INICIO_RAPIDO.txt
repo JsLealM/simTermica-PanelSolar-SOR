@@ -1,0 +1,40 @@
+===============================================
+GUIA DE INICIO RAPIDO
+===============================================
+
+1. ACTIVAR ENTORNO VIRTUAL:
+   Windows CMD:
+   > venv\Scripts\activate
+
+   Windows PowerShell:
+   > .\venv\Scripts\Activate.ps1
+
+   Linux/macOS:
+   $ source venv/bin/activate
+
+2. EJECUTAR LA APLICACION:
+   > python main.py
+
+3. USAR LA INTERFAZ:
+   - Haz clic en el area de dropzone para cargar una imagen grayscale
+   - Configura los parámetros (N, tolerancia, max_iter, ω, λ, T_min, T_max)
+   - Haz clic en "Calcular" para ejecutar la simulación SOR
+   - Visualiza resultados:
+     * Imagen + Heatmap (arriba, 58%)
+     * Gráfico de convergencia (abajo, 42%)
+   - Exporta resultados con los botones CSV, Mapa Calor, Gráfica
+
+4. PARAMETROS IMPORTANTES:
+   - N: Tamaño de matriz (recomendado 30-50)
+   - ω (Omega): 1.70-1.90 para mejor convergencia
+   - λ (Lambda): 1.0 para isotrópico
+   - Tolerancia: 1e-4 o menor para precisión
+
+5. ARCHIVOS:
+   - Imagen de prueba: imagenes_ejemplo/test_image.png
+   - Resultados: Se guardan en resultados/
+   - Especificación: Leer PROJECT_CONTEXT.md
+
+===============================================
+LISTO PARA USAR!
+===============================================
