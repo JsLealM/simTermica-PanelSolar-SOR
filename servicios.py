@@ -10,6 +10,16 @@ from matplotlib.figure import Figure
 import csv
 
 
+def _reducir_para_visualizacion(malla: np.ndarray, max_dim: int = 900) -> tuple[np.ndarray, int]:
+    """
+    Reduce solo para pintar en pantalla/PNG interactivo.
+    Los datos originales siguen completos en memoria y exportación.
+    """
+    alto, ancho = malla.shape[:2]
+    paso = max(1, int(np.ceil(max(alto, ancho) / max_dim)))
+    return malla[::paso, ::paso], paso
+
+
 def guardar_mapa_calor(
     malla: np.ndarray,
     ruta: str,
@@ -54,6 +64,24 @@ def exportar_csv(historial_error: list, ruta: str) -> None:
         writer.writerow(["iteracion", "error"])
         for idx, error in enumerate(historial_error, start=1):
             writer.writerow([idx, error])
+
+
+def exportar_csv_pixeles(
+    malla_temperatura: np.ndarray,
+    malla_potencia: np.ndarray,
+    ruta: str
+) -> None:
+    """
+    Exporta temperatura y potencia estimada para cada pixel.
+    Columnas: fila, columna, temperatura_C, potencia_W
+    """
+    filas, columnas = malla_temperatura.shape
+    with open(ruta, "w", newline="") as f:
+        writer = csv.writer(f)
+        writer.writerow(["fila", "columna", "temperatura_C", "potencia_W"])
+        for i in range(filas):
+            for j in range(columnas):
+                writer.writerow([i, j, float(malla_temperatura[i, j]), float(malla_potencia[i, j])])
 
 
 def guardar_grafica_convergencia(
@@ -119,13 +147,22 @@ def generar_figura_doble(
     else:
         imagen_norm = imagen_grises
     
-    ax_left.imshow(imagen_norm, cmap="gray", vmin=0, vmax=1)
+    imagen_vista, paso_img = _reducir_para_visualizacion(imagen_norm)
+    ax_left.imshow(imagen_vista, cmap="gray", vmin=0, vmax=1)
     ax_left.set_title("Imagen Original (Grises)", fontsize=12, fontweight="bold")
     ax_left.set_xlabel("Columna")
     ax_left.set_ylabel("Fila")
     
     # Subplot derecha: mapa de calor
-    im = ax_right.imshow(malla_resultado, cmap="hot", vmin=T_min, vmax=T_max)
+    malla_vista, paso_heat = _reducir_para_visualizacion(malla_resultado)
+    im = ax_right.imshow(
+        malla_vista,
+        cmap="hot",
+        vmin=T_min,
+        vmax=T_max,
+        extent=(0, malla_resultado.shape[1] - 1, malla_resultado.shape[0] - 1, 0),
+        aspect="auto",
+    )
     ax_right.set_title("Mapa de Calor", fontsize=12, fontweight="bold")
     ax_right.set_xlabel("Columna")
     ax_right.set_ylabel("Fila")
@@ -134,5 +171,40 @@ def generar_figura_doble(
     cbar = plt.colorbar(im, ax=ax_right)
     cbar.set_label("Temperatura (°C)", fontsize=10)
     
+    fig.tight_layout()
+    return fig
+
+
+def generar_figura_individual(
+    imagen_grises: np.ndarray,
+    malla_resultado: np.ndarray,
+    modo: str,
+    T_min: float = 25.0,
+    T_max: float = 75.0
+) -> Figure:
+    """Genera una figura grande para ver solo la imagen gris o solo el mapa."""
+    fig, ax = plt.subplots(figsize=(10, 7), dpi=100)
+
+    if modo == "gris":
+        imagen_norm = imagen_grises / 255.0 if imagen_grises.dtype == np.uint8 else imagen_grises
+        imagen_vista, _ = _reducir_para_visualizacion(imagen_norm, max_dim=1200)
+        ax.imshow(imagen_vista, cmap="gray", vmin=0, vmax=1)
+        ax.set_title("Imagen en escala de grises", fontsize=13, fontweight="bold")
+    else:
+        malla_vista, _ = _reducir_para_visualizacion(malla_resultado, max_dim=1200)
+        im = ax.imshow(
+            malla_vista,
+            cmap="hot",
+            vmin=T_min,
+            vmax=T_max,
+            extent=(0, malla_resultado.shape[1] - 1, malla_resultado.shape[0] - 1, 0),
+            aspect="auto",
+        )
+        ax.set_title("Mapa de calor - Temperatura calculada", fontsize=13, fontweight="bold")
+        cbar = plt.colorbar(im, ax=ax)
+        cbar.set_label("Temperatura (°C)", fontsize=10)
+
+    ax.set_xlabel("Columna")
+    ax.set_ylabel("Fila")
     fig.tight_layout()
     return fig

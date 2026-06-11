@@ -24,6 +24,8 @@ Matriz de temperaturas en grados Celsius
     ↓
 Metodo SOR
     ↓
+Estimacion de potencia en Watts
+    ↓
 Mapa de calor con matplotlib
 ```
 
@@ -145,7 +147,34 @@ Sistema lineal Ax = b
 Metodo SOR para resolverlo
 ```
 
-## 6. Para que se aplica SOR
+## 6. Resolucion completa de la imagen
+
+El sistema conserva la resolucion de la imagen cargada.
+
+Ejemplos:
+
+```text
+Imagen 64x64     -> matriz final 64x64
+Imagen 1000x1000 -> matriz final 1000x1000
+Imagen 800x1200  -> matriz final 800x1200
+```
+
+Esto significa que cada pixel de la imagen tiene una temperatura calculada.
+Para una imagen `1000x1000` hay:
+
+```text
+1000 * 1000 = 1,000,000 pixeles
+```
+
+Por eso no se muestra una tabla gigante en la interfaz. La forma correcta de
+consultar un pixel es mover el mouse o hacer clic sobre el mapa de calor. La
+interfaz muestra:
+
+```text
+fila, columna, temperatura °C, potencia estimada W
+```
+
+## 7. Para que se aplica SOR
 
 Si solo se hiciera la conversion anterior, el resultado seria una traduccion
 directa:
@@ -218,7 +247,107 @@ El laplaciano define la relacion entre vecinos.
 SOR es el metodo iterativo que resuelve esa relacion.
 ```
 
-## 7. Prueba de escritorio sencilla
+## 8. Omega automatico
+
+Antes el usuario elegia `ω`. Ahora el sistema calcula un valor automatico con
+base en el tamaño de la malla.
+
+La formula teorica usada es:
+
+```text
+rho = (cos(pi / (columnas_interiores + 1)) + cos(pi / (filas_interiores + 1))) / 2
+
+omega_opt = 2 / (1 + sqrt(1 - rho^2))
+```
+
+Como en mallas muy grandes el valor teorico se acerca demasiado a `2`, el
+programa aplica un limite practico:
+
+```text
+omega_usado = min(omega_opt, 1.90)
+```
+
+Esto mantiene sobrerrelajacion, pero reduce el riesgo de oscilaciones.
+
+## 9. Estimacion de Watts con PVWatts
+
+La potencia aproximada se calcula con el modelo PVWatts DC:
+
+```text
+P_dc = (G / 1000) * Pdc0 * (1 + gamma_pdc * (T_cell - 25))
+```
+
+Donde:
+
+```text
+P_dc       = potencia DC estimada en Watts
+G          = irradiancia efectiva en W/m²
+Pdc0       = potencia nominal del panel en STC
+gamma_pdc  = coeficiente termico de potencia
+T_cell     = temperatura de celda o temperatura del pixel
+25         = temperatura de referencia STC en °C
+```
+
+### Como encontrar los datos
+
+`Pdc0` se encuentra en la etiqueta o ficha tecnica del panel. Ejemplos comunes:
+
+```text
+Pmax = 450 W
+Maximum Power = 550 W
+Rated Power = 330 W
+```
+
+`gamma_pdc` aparece en la ficha tecnica como coeficiente de temperatura de
+potencia. Puede aparecer como:
+
+```text
+Temperature Coefficient of Pmax = -0.35 %/°C
+```
+
+Para usarlo en la formula se convierte a decimal:
+
+```text
+-0.35 %/°C = -0.0035 1/°C
+```
+
+Si no se tiene la ficha tecnica, el programa usa presets:
+
+```text
+Monocristalino   -> gamma_pdc = -0.0035
+Policristalino   -> gamma_pdc = -0.0040
+Pelicula delgada -> gamma_pdc = -0.0025
+```
+
+`G` es la irradiancia. Si no se mide con sensor, se puede usar el valor de
+referencia STC:
+
+```text
+G = 1000 W/m²
+```
+
+### Potencia total y potencia por pixel
+
+Para la potencia total del panel se usa la temperatura media:
+
+```text
+P_total = (G / 1000) * Pdc0 * (1 + gamma_pdc * (T_media - 25))
+```
+
+Para la potencia aproximada de cada pixel se distribuye `Pdc0` entre todos los
+pixeles:
+
+```text
+P_pixel = (G / 1000) * (Pdc0 / numero_pixeles) * (1 + gamma_pdc * (T_pixel - 25))
+```
+
+Si una potencia calculada queda negativa, el sistema la limita a:
+
+```text
+0 W
+```
+
+## 10. Prueba de escritorio sencilla
 
 Supongamos una imagen muy pequena de 4x4 pixeles.
 
@@ -359,7 +488,7 @@ error < tolerancia
 
 el metodo se detiene. Si no, SOR repite otra iteracion.
 
-## 8. Que muestra matplotlib
+## 11. Que muestra matplotlib
 
 Matplotlib no calcula la temperatura. Solo dibuja la matriz final.
 
@@ -382,14 +511,15 @@ La barra de color indica la correspondencia entre color y temperatura.
 Por eso es correcto mostrar toda la imagen en el mapa de calor: cada posicion
 del mapa representa la temperatura calculada para esa zona del panel.
 
-## 9. Resumen corto
+## 12. Resumen corto
 
 ```text
 1. La imagen se vuelve una matriz de pixeles.
 2. Cada pixel se normaliza de 0-255 a 0-1.
 3. Cada pixel se convierte a temperatura con T_min y T_max.
 4. SOR ajusta esas temperaturas usando los vecinos.
-5. Matplotlib pinta la matriz final como mapa de calor.
+5. Se calcula potencia aproximada con PVWatts.
+6. Matplotlib pinta la matriz final como mapa de calor.
 ```
 
 La parte importante es:
