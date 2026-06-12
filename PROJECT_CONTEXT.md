@@ -13,6 +13,11 @@ usando el método SOR (Successive Over-Relaxation) sobre el sistema lineal gener
 por el filtro laplaciano discreto. La salida principal es un mapa de calor superpuesto
 a la geometría del panel con métricas numéricas de convergencia.
 
+**Estado actual de implementación:** la aplicación conserva la resolución real de
+la imagen (`alto × ancho`), calcula `ω` automáticamente, usa SOR red-black
+vectorizado con NumPy, permite consultar temperatura/potencia por píxel en el mapa
+de calor y estima potencia DC aproximada con PVWatts.
+
 **Integrantes:** Johan Leal · Wilson Villamizar · Rusbell  
 **Repositorio:** https://github.com/wilsonvdev/Algoritmos_numericos_mapa-de-calor
 
@@ -27,32 +32,33 @@ Imagen JPG/PNG/BMP
         ↓
 Convertir a escala de grises (si no lo está ya)
         ↓
-Escalar a malla N×N (interpolación bilineal)  ← N configurable, default 30
+Conservar resolución real como malla alto×ancho
         ↓
-Mapeo píxel → temperatura de frontera (condiciones Dirichlet)
+Mapeo de cada píxel → temperatura
         ↓
-Construir sistema Ax = b (filtro laplaciano)
+Construir sistema implícito Ax = b (filtro laplaciano, b = T_pixel)
         ↓
-Resolver con SOR → vector x de temperaturas interiores
+Resolver con SOR red-black vectorizado
         ↓
-Reconstruir malla 2D → mapa de calor con matplotlib
+Calcular watts aproximados con PVWatts
+        ↓
+Mostrar imagen gris o mapa de calor en el panel central
 ```
 
 ### 2.2 Mapeo píxel → temperatura
 
-Cada píxel del borde de la imagen (frame exterior) se convierte en condición de
-frontera de tipo Dirichlet:
+Cada píxel de la imagen se convierte en temperatura:
 
 ```
-T_frontera[i][j] = T_min + (pixel[i][j] / 255) * (T_max - T_min)
+T_pixel[i][j] = T_min + (pixel[i][j] / 255) * (T_max - T_min)
 ```
 
 Parámetros físicos justificados:
 - T_min = 25 °C  → borde sombreado / temperatura ambiente
 - T_max = 75 °C  → zona de máxima irradiancia (paneles en verano: 55–75 °C)
 
-Los nodos interiores tienen temperatura inicial = 0 (o promedio de frontera).
-Son las incógnitas del sistema.
+Los bordes permanecen fijos durante SOR. Los nodos interiores se ajustan usando
+el filtro laplaciano y el valor `T_pixel` como término fuente del sistema.
 
 ### 2.3 Ecuación física
 
@@ -62,8 +68,9 @@ Conducción de calor en estado estacionario — ecuación de Poisson 2D:
 ∂²T/∂x² + ∂²T/∂y² = -f(x,y) / k
 ```
 
-Con f=0 (sin fuentes internas explícitas) se reduce a Laplace. La imagen ya
-codifica las condiciones de frontera; no se necesita término fuente separado.
+En la implementación actual la imagen sí se usa como término fuente discreto:
+`b[i,j] = T_pixel[i,j]`. Esto evita que zonas calientes internas dependan solo
+de los bordes.
 
 ### 2.4 Discretización — Filtro Laplaciano (fórmula del profesor)
 
@@ -74,8 +81,8 @@ Stencil de cinco puntos con parámetro λ, aplicado sobre el nodo interior (i,j)
 ```
 
 - Cuando λ = 1 → Laplaciano clásico discreto (four-neighbor averaging)
-- Los vecinos en el borde pasan al lado derecho → contribuyen a b[i][j]
-- Cada nodo interior genera UNA ecuación; malla N×N → sistema N²×N²
+- `b[i][j]` corresponde a la temperatura original del píxel.
+- Cada nodo interior genera una ecuación; la malla puede ser rectangular `alto×ancho`.
 
 **Rango recomendado de λ:**
 
@@ -93,7 +100,7 @@ Stencil de cinco puntos con parámetro λ, aplicado sobre el nodo interior (i,j)
 
 ### 2.5 Construcción de A y b
 
-Para malla de (N-2)×(N-2) nodos interiores (los bordes son frontera),
+Para malla de `(alto-2)×(ancho-2)` nodos interiores (los bordes son frontera),
 ordenando nodos por filas (row-major):
 
 ```python
@@ -109,14 +116,16 @@ A[idx][idx] = 1 + 4*lambda_val
 # Vecino izquierda (i, j-1): A[idx][idx - 1]      = -lambda_val
 # Vecino derecha   (i, j+1): A[idx][idx + 1]      = -lambda_val
 
-# Si vecino es frontera: b[idx] += lambda_val * T_frontera[vecino]
+# En la implementación actual:
+b[idx] = T_pixel[i][j]
 ```
 
 **Propiedades de A** (garantizan convergencia de SOR):
 - Dispersa (sparse): ≤ 5 entradas no nulas por fila
 - Simétrica y definida positiva
 - Diagonalmente dominante: (1+4λ) > 4λ para todo λ > 0
-- Para N=30 → A es 784×784 con ~3920 entradas no nulas
+- Para una imagen `alto×ancho`, el sistema se aplica sobre los nodos interiores
+  `(alto-2)×(ancho-2)` sin construir `A` como matriz densa.
 
 **Nota de implementación:** NO construir A como matriz densa. Usar el stencil
 directamente en el loop de SOR (in-place sobre la malla 2D) para eficiencia de
@@ -130,10 +139,12 @@ para N grandes, aplicar el stencil directamente.
 | T_min          | 25 °C             | Temperatura ambiente / borde sombreado (STC reference)   |
 | T_max          | 75 °C             | Irradiancia máxima en verano (literatura fotovoltaica)   |
 | λ (laplaciano) | 1.0 (default)     | Laplaciano clásico; usuario puede ajustar en [−0.5, 1.5] |
-| N (malla)      | 30 × 30           | Balance resolución / tiempo de cómputo                   |
-| ω (SOR)        | 1.81              | ω_opt = 2 / (1 + sin(π/30)) ≈ 1.81                      |
-| ε (tolerancia) | 1 × 10⁻⁶          | Norma infinito entre iteraciones consecutivas            |
-| max_iter       | 5000              | Límite de seguridad; si no converge → reportar           |
+| Resolución     | alto × ancho imagen| Se conserva la resolución real de la imagen               |
+| ω (SOR)        | automático         | Calculado por tamaño de malla, limitado a 1.90            |
+| ε (tolerancia) | 1 × 10⁻⁴ default   | Norma infinito entre iteraciones consecutivas             |
+| max_iter       | 200 default        | Límite práctico para imágenes grandes                     |
+| Pdc0           | 450 W default      | Potencia nominal para estimación PVWatts                  |
+| G              | 1000 W/m² default  | Irradiancia de referencia STC                             |
 
 ---
 
@@ -145,21 +156,15 @@ para N grandes, aplicar el stencil directamente.
 x_i^(k+1) = (1 - ω) · x_i^(k)  +  (ω / a_ii) · ( b_i  −  Σ_{j<i} a_ij·x_j^(k+1)  −  Σ_{j>i} a_ij·x_j^(k) )
 ```
 
-Aplicada al stencil laplaciano en la malla 2D (forma eficiente, sin construir A):
+Aplicada al stencil laplaciano en la malla 2D:
 
 ```python
-def sor_step(T, T_frontera, lambda_val, omega, N):
-    """Una iteración SOR sobre la malla T (incluye bordes fijos)."""
-    error = 0.0
-    for i in range(1, N-1):           # nodos interiores fila
-        for j in range(1, N-1):       # nodos interiores columna
-            T_gs = (lambda_val * (T[i-1][j] + T[i+1][j] + T[i][j-1] + T[i][j+1])
-                   ) / (1 + 4*lambda_val)   # Gauss-Seidel puro
-            T_new = (1 - omega) * T[i][j] + omega * T_gs
-            error = max(error, abs(T_new - T[i][j]))
-            T[i][j] = T_new
-    return error   # norma infinito de la diferencia
+T_gs = (T_pixel[i,j] + λ*(T_arriba + T_abajo + T_izq + T_der)) / (1 + 4λ)
+T_new = (1 - ω) * T_anterior + ω * T_gs
 ```
+
+La implementación usa red-black SOR vectorizado: actualiza primero un color del
+tablero y luego el otro, manteniendo la naturaleza iterativa SOR.
 
 ### 3.2 Criterio de parada
 
@@ -171,12 +176,12 @@ k >= max_iter               →   NO CONVERGIÓ (reportar advertencia)
 ### 3.3 ω óptimo teórico
 
 ```
-ω_opt = 2 / (1 + sin(π / N))
+rho = (cos(π / (columnas_interiores + 1)) + cos(π / (filas_interiores + 1))) / 2
+ω_opt = 2 / (1 + sqrt(1 - rho²))
+ω_usado = min(ω_opt, 1.90)
 ```
 
-Para N=30: ω_opt ≈ 1.81  
-Con ω_opt, SOR converge 3–10× más rápido que Jacobi.  
-El usuario puede modificar ω; el software valida que ω ∈ (0, 2).
+El usuario ya no elige `ω` manualmente en la interfaz principal.
 
 ### 3.4 Registro de convergencia
 
@@ -194,6 +199,7 @@ proyecto_panel_solar/
 ├── controlador.py           # CAPA 2 — Coordinación y validación
 ├── traduccion.py            # CAPA 3 — Imagen → matriz numérica → Ax=b
 ├── servicios.py             # CAPA 5 — Exportación, gráficas, mensajes
+├── energia.py               # Estimación PVWatts DC
 ├── metodos/
 │   ├── __init__.py
 │   └── sor.py               # CAPA 4 — Implementación SOR pura (solo cálculo)
@@ -218,20 +224,23 @@ proyecto_panel_solar/
 Widgets que debe contener:
 - Panel izquierdo (controles):
   - Label + botón "Cargar Imagen" → abre filedialog, llama controlador
-  - Entry: N (tamaño malla), default 30, validación solo enteros
-  - Entry: Tolerancia ε, default 1e-6
-  - Entry: Máx. iteraciones, default 5000
-  - Entry + Slider: ω ∈ (0, 2), default 1.81
+  - Entry: Tolerancia ε, default actual 1e-4
+  - Entry: Máx. iteraciones, default actual 200
+  - Label de ω automático calculado
   - Entry: λ (filtro laplaciano), default 1.0
+  - Selector: tipo de panel
+  - Entry: Pdc0 (W)
+  - Entry: irradiancia G (W/m²)
   - Label fijo "SOR" con badge visual "activo"
   - Botón "Calcular" → llama controlador.ejecutar()
   - Botón "Limpiar" → resetea estado
   - Botón "Salir" → cierra ventana
 - Panel central:
-  - FigureCanvas matplotlib: imagen en grises (izquierda) + mapa de calor (derecha)
-  - FigureCanvas matplotlib: gráfica error-vs-iteración
+  - FigureCanvas matplotlib con una sola vista grande a la vez
+  - Botones/flechas: imagen gris ↔ mapa de calor
+  - Lectura de píxel en el mapa de calor: fila, columna, temperatura, potencia
 - Panel derecho:
-  - Labels de métricas: iteraciones, error final, tiempo (s), T_max (°C), convergió S/N
+  - Labels de métricas: iteraciones, error final, tiempo, T_max, T_media, potencia total, potencia por píxel, omega usado
   - Botón "Guardar mapa calor" → llama servicios
   - Botón "Exportar CSV" → llama servicios
   - Botón "Guardar gráfica PNG" → llama servicios
@@ -265,13 +274,16 @@ class Controlador:
 **Parámetros que recibe del form (dict):**
 ```python
 {
-    "omega": float,       # factor de relajación
+    "omega": None,        # se calcula automáticamente
     "tolerancia": float,  # ε criterio de parada
     "max_iter": int,      # iteraciones máximas
-    "N": int,             # tamaño de malla
+    "N": tuple[int, int], # resolución alto×ancho
     "lambda_val": float,  # parámetro del filtro laplaciano
     "T_min": float,       # temperatura mínima (°C)
     "T_max": float,       # temperatura máxima (°C)
+    "pdc0": float,        # potencia nominal del panel
+    "irradiancia": float, # G en W/m²
+    "tipo_panel": str,    # preset de panel
 }
 ```
 
@@ -279,7 +291,7 @@ class Controlador:
 ```python
 @dataclass
 class ResultadoSOR:
-    malla_resultado: np.ndarray      # malla N×N con temperaturas finales
+    malla_resultado: np.ndarray      # malla alto×ancho con temperaturas finales
     iteraciones: int                  # cuántas iteraciones se hicieron
     error_final: float                # error en la última iteración
     tiempo_seg: float                 # tiempo de cómputo en segundos
@@ -287,6 +299,12 @@ class ResultadoSOR:
     historial_error: list[float]      # error por iteración (para la gráfica)
     T_max_calculada: float            # temperatura máxima en la malla resultado
     T_min_calculada: float            # temperatura mínima en la malla resultado
+    T_media_calculada: float
+    omega_usado: float
+    malla_potencia: np.ndarray
+    potencia_total: float
+    tipo_panel: str
+    gamma_pdc: float
 ```
 
 ---
@@ -302,19 +320,16 @@ def cargar_imagen_grises(ruta: str) -> np.ndarray:
     Devuelve array numpy uint8 de shape (H, W).
     """
 
-def imagen_a_malla(imagen: np.ndarray, N: int) -> np.ndarray:
+def imagen_a_malla(imagen: np.ndarray, tamaño: int | tuple[int, int] | None = None) -> np.ndarray:
     """
-    Redimensiona la imagen a N×N usando interpolación bilineal (PIL.BILINEAR).
+    Conserva resolución si tamaño=None; si se entrega tamaño, redimensiona.
     Convierte a float64 normalizado [0.0, 1.0].
-    Devuelve array N×N.
     """
 
 def aplicar_condiciones_frontera(malla: np.ndarray, T_min: float, T_max: float) -> np.ndarray:
     """
-    Mapea los valores de borde (frame exterior) a temperaturas reales.
-    T_frontera = T_min + valor_normalizado * (T_max - T_min)
-    Los nodos interiores se inicializan con el promedio de la frontera.
-    Devuelve malla N×N con float64 en °C (bordes fijos, interiores inicializados).
+    Mapea toda la malla a temperaturas reales.
+    T_pixel = T_min + valor_normalizado * (T_max - T_min)
     """
 ```
 
@@ -331,13 +346,13 @@ import time
 
 def resolver(
     malla_inicial: np.ndarray,
-    omega: float,
+    omega: float | None,
     lambda_val: float,
     tolerancia: float,
     max_iter: int
 ) -> dict:
     """
-    Ejecuta SOR sobre la malla.
+    Ejecuta SOR red-black vectorizado sobre la malla.
     Los bordes de malla_inicial son las condiciones de Dirichlet fijas —
     NO se modifican durante la iteración.
     
@@ -348,6 +363,7 @@ def resolver(
         tiempo_seg: float
         convergio: bool
         historial_error: list[float]
+        omega_usado: float
     """
     T = malla_inicial.copy().astype(np.float64)
     N = T.shape[0]
@@ -417,12 +433,12 @@ def guardar_grafica_convergencia(historial_error: list, ruta: str, iteraciones: 
     Línea de tolerancia marcada. Guarda como PNG.
     """
 
-def generar_figura_doble(imagen_grises: np.ndarray, malla_resultado: np.ndarray,
+def generar_figura_individual(imagen_grises: np.ndarray, malla_resultado: np.ndarray,
                           T_min: float, T_max: float) -> plt.Figure:
     """
-    Devuelve Figure matplotlib con dos subplots lado a lado:
-    - Izquierda: imagen original en grises (cmap='gray')
-    - Derecha: mapa de calor (cmap='hot') con colorbar en °C
+    Devuelve Figure matplotlib con una sola vista:
+    - modo gris
+    - modo mapa de calor
     Para embeber en la interfaz tkinter.
     """
 ```
@@ -439,10 +455,10 @@ interfaz.py  →  lee campos del form  →  dict params
          │
          ▼
 controlador.py.ejecutar(params)
-    │    ├─ valida omega, epsilon, N, lambda
+    │    ├─ valida epsilon, tamaño, lambda, Pdc0, irradiancia
     │    ├─ traduccion.imagen_a_malla(imagen_cargada, N)
     │    ├─ traduccion.aplicar_condiciones_frontera(malla, T_min, T_max)
-    │    └─ metodos.sor.resolver(malla, omega, lambda, tol, max_iter)
+    │    └─ metodos.sor.resolver(malla, omega=None, lambda, tol, max_iter)
     │              │
     │              └─ retorna dict crudo
     │
@@ -451,10 +467,12 @@ controlador.py.ejecutar(params)
          │
          ▼
 interfaz.py
-    ├─ servicios.generar_figura_doble()  →  actualiza canvas matplotlib
-    ├─ actualiza labels métricas (iters, error, tiempo, T_max)
+    ├─ energia.calcular_mapa_potencia()
+    ├─ servicios.generar_figura_individual()  →  actualiza canvas matplotlib
+    ├─ actualiza labels métricas
     ├─ servicios.guardar_mapa_calor()    →  (si usuario lo pide)
-    └─ servicios.exportar_csv()          →  (si usuario lo pide)
+    ├─ servicios.exportar_csv()          →  convergencia
+    └─ servicios.exportar_csv_pixeles()  →  temperatura/potencia por píxel
 ```
 
 ---
@@ -487,7 +505,7 @@ python main.py
 1. **No mezclar responsabilidades entre capas** — el profesor lo verificará
 2. **Solo SOR como método** — no implementar Jacobi, GS ni SSOR
 3. **Escala de grises obligatoria** — la imagen siempre se convierte a gris
-4. **ω validado en (0, 2) estricto** — rechazar valores fuera del intervalo
+4. **ω automático** — se calcula en `metodos/sor.py` y se reporta en la UI
 5. **λ validado ≠ 0** — con λ=0 la ecuación es trivial (imagen = entrada)
 6. **Comentarios en todo el código** — nombres de variables en español o inglés claro
 7. **Los bordes de la malla son inmutables durante SOR** — solo se actualizan interiores
@@ -499,10 +517,9 @@ python main.py
 
 | Caso                        | Comportamiento esperado                                  |
 |-----------------------------|----------------------------------------------------------|
-| ω = 1.0                     | Equivale a Gauss-Seidel; converge más lento              |
-| ω = 1.81, N = 30            | Convergencia óptima, ~60–200 iters según imagen          |
-| ω = 0.5                     | Sub-relajación, converge pero más lento que GS           |
-| ω = 1.99                    | Límite superior, puede oscilar en algunas imágenes       |
+| Imagen 64×64                | Resultado 64×64, sin reducción de datos                  |
+| Imagen rectangular          | Resultado alto×ancho, conserva proporción                |
+| ω automático                | Se reporta en métricas y queda ≤ 1.90                    |
 | λ = 1.0                     | Laplaciano clásico, comportamiento estándar              |
 | λ = 0.5                     | Suavizado moderado                                       |
 | λ = -0.2                    | Realce de bordes térmicos                                |
@@ -514,14 +531,14 @@ python main.py
 
 ## 10. NOTAS PARA EL DESARROLLADOR
 
-- **El loop doble de SOR es O(N²) por iteración.** Para N=30 con ~100 iters son
-  90.000 operaciones — perfectamente rápido en Python puro. No sobre-optimizar.
+- **SOR usa red-black vectorizado con NumPy.** Esto permite trabajar con imágenes
+  grandes sin recorrer cada píxel con Python puro.
 
-- **La malla incluye los bordes:** `T` es de shape `(N, N)`. Los índices `[1:-1, 1:-1]`
+- **La malla incluye los bordes:** `T` es de shape `(alto, ancho)`. Los índices `[1:-1, 1:-1]`
   son los interiores. Los bordes `[0,:], [-1,:], [:,0], [:,-1]` son Dirichlet fijos.
 
-- **Matplotlib dentro de tkinter:** usar `FigureCanvasTkAgg`. La figura se actualiza
-  con `canvas.draw()` después de cada cálculo. No abrir ventanas matplotlib separadas.
+- **Matplotlib dentro de tkinter:** usar `FigureCanvasTkAgg`. La vista central
+  alterna entre imagen gris y mapa de calor en la misma ventana principal.
 
 - **Colormap para el mapa de calor:** `'hot'` (negro→rojo→amarillo→blanco) o
   `'plasma'` — ambos son perceptualmente uniformes y transmiten temperatura bien.
@@ -531,6 +548,8 @@ python main.py
 
 - **El CSV de convergencia** tiene dos columnas: `iteracion,error`. Sin índice.
   Una fila por iteración realizada.
+
+- **El CSV por píxel** tiene columnas: `fila,columna,temperatura_C,potencia_W`.
 
 - **main.py** es mínimo:
   ```python

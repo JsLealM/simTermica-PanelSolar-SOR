@@ -235,10 +235,68 @@ class Aplicacion(tk.Tk):
     
     def crear_panel_central(self, parent):
         panel = tk.Frame(parent, bg=self.BG_WINDOW)
-        
+
+        barra_nav = tk.Frame(panel, bg=self.BG_SIDEBAR, height=48)
+        barra_nav.pack(fill=tk.X, side=tk.TOP)
+        barra_nav.pack_propagate(False)
+
+        self.modo_resultado = "gris"
+        tk.Button(
+            barra_nav,
+            text="← Imagen gris",
+            font=("Segoe UI", 10, "bold"),
+            bg=self.BORDER_LIGHT,
+            fg=self.TEXT_BODY,
+            relief=tk.FLAT,
+            command=lambda: self._cambiar_modo_resultado("gris")
+        ).pack(side=tk.LEFT, padx=10, pady=8)
+
+        self.label_modo_resultado = tk.Label(
+            barra_nav,
+            text="Cargue una imagen y calcule para ver resultados",
+            font=("Segoe UI", 11, "bold"),
+            fg=self.TEXT_SECTION,
+            bg=self.BG_SIDEBAR
+        )
+        self.label_modo_resultado.pack(side=tk.LEFT, expand=True)
+
+        tk.Button(
+            barra_nav,
+            text="Mapa de calor →",
+            font=("Segoe UI", 10, "bold"),
+            bg=self.ACCENT,
+            fg="white",
+            relief=tk.FLAT,
+            command=lambda: self._cambiar_modo_resultado("calor")
+        ).pack(side=tk.RIGHT, padx=10, pady=8)
+
+        self.frame_figura_resultado = tk.Frame(panel, bg=self.BG_WINDOW)
+        self.frame_figura_resultado.pack(fill=tk.BOTH, expand=True, padx=8, pady=8)
+
+        self.label_placeholder_central = tk.Label(
+            self.frame_figura_resultado,
+            text="Cargue una imagen para comenzar",
+            font=("Segoe UI", 14, "bold"),
+            fg=self.TEXT_BODY,
+            bg=self.BG_WINDOW
+        )
+        self.label_placeholder_central.pack(expand=True)
+
+        barra_info = tk.Frame(panel, bg=self.BORDER_LIGHT, height=34)
+        barra_info.pack(fill=tk.X, side=tk.BOTTOM)
+        barra_info.pack_propagate(False)
+        self.label_pixel_resultado = tk.Label(
+            barra_info,
+            text="En el mapa de calor se mostrará fila, columna, temperatura y potencia del píxel",
+            font=("Segoe UI", 10),
+            fg=self.TEXT_BODY,
+            bg=self.BORDER_LIGHT,
+            anchor="w"
+        )
+        self.label_pixel_resultado.pack(fill=tk.X, padx=12)
+
         self.canvas_matplotlib = None
         self.fig = None
-        self.ventana_resultados = None
         self.canvas_resultados = None
         
         return panel
@@ -467,9 +525,10 @@ class Aplicacion(tk.Tk):
         if self.ultimo_resultado is None:
             return
 
-        self.abrir_ventana_resultados()
+        self.modo_resultado = "gris"
+        self._renderizar_resultado_en_panel()
 
-    def abrir_ventana_resultados(self):
+    def _renderizar_resultado_en_panel(self):
         if self.ultimo_resultado is None:
             return
 
@@ -481,65 +540,15 @@ class Aplicacion(tk.Tk):
             escala_T_min = self.ultimo_resultado.T_min_calculada
             escala_T_max = self.ultimo_resultado.T_max_calculada
 
-        if self.ventana_resultados is not None and self.ventana_resultados.winfo_exists():
-            self.ventana_resultados.destroy()
+        if self.canvas_resultados:
+            self.canvas_resultados.get_tk_widget().destroy()
+            self.canvas_resultados = None
+        if hasattr(self, "label_placeholder_central") and self.label_placeholder_central.winfo_exists():
+            self.label_placeholder_central.destroy()
 
-        self.ventana_resultados = tk.Toplevel(self)
-        self.ventana_resultados.title("Resultados - Mapa de calor y temperatura por pixel")
-        self.ventana_resultados.geometry("1300x850")
-        self.ventana_resultados.minsize(1000, 650)
-        self.ventana_resultados.configure(bg=self.BG_WINDOW)
-
-        barra_nav = tk.Frame(self.ventana_resultados, bg=self.BG_SIDEBAR, height=48)
-        barra_nav.pack(fill=tk.X, side=tk.TOP)
-        barra_nav.pack_propagate(False)
-
-        self.modo_resultado = "gris"
-        tk.Button(
-            barra_nav,
-            text="← Imagen gris",
-            font=("Segoe UI", 10, "bold"),
-            bg=self.BORDER_LIGHT,
-            fg=self.TEXT_BODY,
-            relief=tk.FLAT,
-            command=lambda: self._cambiar_modo_resultado("gris")
-        ).pack(side=tk.LEFT, padx=10, pady=8)
-
-        self.label_modo_resultado = tk.Label(
-            barra_nav,
-            text="Imagen en escala de grises",
-            font=("Segoe UI", 11, "bold"),
-            fg=self.TEXT_SECTION,
-            bg=self.BG_SIDEBAR
+        self.label_modo_resultado.config(
+            text="Imagen en escala de grises" if self.modo_resultado == "gris" else "Mapa de calor - temperatura calculada"
         )
-        self.label_modo_resultado.pack(side=tk.LEFT, expand=True)
-
-        tk.Button(
-            barra_nav,
-            text="Mapa de calor →",
-            font=("Segoe UI", 10, "bold"),
-            bg=self.ACCENT,
-            fg="white",
-            relief=tk.FLAT,
-            command=lambda: self._cambiar_modo_resultado("calor")
-        ).pack(side=tk.RIGHT, padx=10, pady=8)
-
-        barra_info = tk.Frame(self.ventana_resultados, bg=self.BORDER_LIGHT, height=34)
-        barra_info.pack(fill=tk.X, side=tk.BOTTOM)
-        barra_info.pack_propagate(False)
-        self.label_pixel_resultado = tk.Label(
-            barra_info,
-            text="Mueva el cursor sobre el mapa de calor para ver fila, columna, temperatura y potencia",
-            font=("Segoe UI", 10),
-            fg=self.TEXT_BODY,
-            bg=self.BORDER_LIGHT,
-            anchor="w"
-        )
-        self.label_pixel_resultado.pack(fill=tk.X, padx=12)
-
-        frame_figura = tk.Frame(self.ventana_resultados, bg=self.BG_WINDOW)
-        frame_figura.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
-        self.frame_figura_resultado = frame_figura
 
         self.fig = generar_figura_individual(
             imagen_grises=self.controlador.imagen_grises,
@@ -549,50 +558,21 @@ class Aplicacion(tk.Tk):
             T_max=escala_T_max
         )
         
-        self.canvas_resultados = FigureCanvasTkAgg(self.fig, master=frame_figura)
-        self.canvas_resultados.draw()
-        self.canvas_resultados.get_tk_widget().pack(fill=tk.BOTH, expand=True)
-        self.ax_heatmap = None
-        self.canvas_resultados.mpl_connect("motion_notify_event", self._mostrar_pixel_en_cursor)
-        self.canvas_resultados.mpl_connect("button_press_event", self._mostrar_pixel_en_cursor)
-
-        self.status_label.config(text="Resultados abiertos en ventana separada")
-
-    def _cambiar_modo_resultado(self, modo: str):
-        if self.ultimo_resultado is None or self.ventana_resultados is None:
-            return
-        if not self.ventana_resultados.winfo_exists():
-            return
-
-        from servicios import generar_figura_individual
-        self.modo_resultado = modo
-        self.label_modo_resultado.config(
-            text="Imagen en escala de grises" if modo == "gris" else "Mapa de calor - temperatura calculada"
-        )
-
-        if self.canvas_resultados:
-            self.canvas_resultados.get_tk_widget().destroy()
-
-        try:
-            escala_T_min = float(self.var_T_min.get())
-            escala_T_max = float(self.var_T_max.get())
-        except ValueError:
-            escala_T_min = self.ultimo_resultado.T_min_calculada
-            escala_T_max = self.ultimo_resultado.T_max_calculada
-
-        self.fig = generar_figura_individual(
-            imagen_grises=self.controlador.imagen_grises,
-            malla_resultado=self.ultimo_resultado.malla_resultado,
-            modo=modo,
-            T_min=escala_T_min,
-            T_max=escala_T_max
-        )
         self.canvas_resultados = FigureCanvasTkAgg(self.fig, master=self.frame_figura_resultado)
         self.canvas_resultados.draw()
         self.canvas_resultados.get_tk_widget().pack(fill=tk.BOTH, expand=True)
-        self.ax_heatmap = self.fig.axes[0] if modo == "calor" else None
+        self.ax_heatmap = self.fig.axes[0] if self.modo_resultado == "calor" else None
         self.canvas_resultados.mpl_connect("motion_notify_event", self._mostrar_pixel_en_cursor)
         self.canvas_resultados.mpl_connect("button_press_event", self._mostrar_pixel_en_cursor)
+
+        self.status_label.config(text="Resultados mostrados en el panel central")
+
+    def _cambiar_modo_resultado(self, modo: str):
+        if self.ultimo_resultado is None:
+            return
+
+        self.modo_resultado = modo
+        self._renderizar_resultado_en_panel()
 
     def _mostrar_pixel_en_cursor(self, event):
         if self.ultimo_resultado is None or not hasattr(self, "ax_heatmap") or self.ax_heatmap is None:
@@ -701,12 +681,24 @@ class Aplicacion(tk.Tk):
         self.btn_exportar_pixeles.config(state=tk.DISABLED)
         self.status_label.config(text="Listo")
         self.status_indicator.config(fg="#4CAF50")
-        if self.canvas_matplotlib:
-            self.canvas_matplotlib.get_tk_widget().destroy()
-            self.canvas_matplotlib = None
-        if self.ventana_resultados is not None and self.ventana_resultados.winfo_exists():
-            self.ventana_resultados.destroy()
-            self.ventana_resultados = None
+        if self.canvas_resultados:
+            self.canvas_resultados.get_tk_widget().destroy()
+            self.canvas_resultados = None
+        self.ax_heatmap = None
+        self.label_modo_resultado.config(text="Cargue una imagen y calcule para ver resultados")
+        self.label_pixel_resultado.config(
+            text="En el mapa de calor se mostrará fila, columna, temperatura y potencia del píxel"
+        )
+        if hasattr(self, "label_placeholder_central") and self.label_placeholder_central.winfo_exists():
+            self.label_placeholder_central.destroy()
+        self.label_placeholder_central = tk.Label(
+            self.frame_figura_resultado,
+            text="Cargue una imagen para comenzar",
+            font=("Segoe UI", 14, "bold"),
+            fg=self.TEXT_BODY,
+            bg=self.BG_WINDOW
+        )
+        self.label_placeholder_central.pack(expand=True)
 
 if __name__ == "__main__":
     app = Aplicacion()

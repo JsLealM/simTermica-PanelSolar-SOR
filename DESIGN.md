@@ -5,6 +5,32 @@
 
 ---
 
+## ESTADO ACTUAL IMPLEMENTADO
+
+Esta guía conserva especificaciones visuales originales, pero la implementación
+actual tiene cambios funcionales importantes. Si una sección posterior contradice
+esta lista, prevalece esta sección:
+
+- La ventana principal abre en `1600×950`, tiene `minsize(1400, 850)` y es redimensionable.
+- El panel izquierdo tiene scroll vertical y los botones `Calcular`, `Limpiar` y `Salir` quedan fijos abajo.
+- El panel central muestra una sola vista grande a la vez:
+  - `← Imagen gris`
+  - `Mapa de calor →`
+- La imagen gris y el mapa de calor se alternan en la misma ventana principal; no se abre ventana secundaria.
+- La lectura por píxel se muestra al mover/clicar sobre el mapa de calor:
+  `fila`, `columna`, `temperatura °C`, `potencia W`.
+- La resolución de datos se conserva como `alto × ancho`; matplotlib puede reducir solo la visualización para rendimiento.
+- `ω` no se edita con slider: se calcula automáticamente y se muestra como métrica.
+- El panel incluye parámetros fotovoltaicos: tipo de panel, `Pdc0` e irradiancia `G`.
+- El panel derecho muestra métricas térmicas, convergencia, potencia total, potencia por píxel y `ω` usado.
+- Exportaciones actuales: convergencia CSV, mapa PNG, gráfica PNG y CSV por píxel.
+
+Las secciones siguientes siguen siendo útiles como referencia de paleta, tipografía
+y estilo general, pero algunos layouts y controles fueron reemplazados por la
+implementación descrita arriba.
+
+---
+
 ## 0. ADVERTENCIA IMPORTANTE SOBRE TKINTER
 
 tkinter NO soporta de forma nativa:
@@ -30,10 +56,10 @@ bien impreso. Fondo crema/hueso, panel lateral arena, acento ámbar solar.
 **Referencia directa:** el boceto SVG generado durante el diseño del proyecto.
 Mantener EXACTAMENTE esa paleta: no cambiar a dark theme, no cambiar el acento.
 
-**Layout de referencia (del PNG en el entregable):**
-- Columna izquierda: controles (imagen, parámetros, método, acciones)
-- Columna central: mapa de calor ARRIBA (protagonista) + gráfica convergencia ABAJO
-- Columna derecha: métricas numéricas + botones de exportación
+**Layout de referencia actual:**
+- Columna izquierda: controles, parámetros, panel fotovoltaico y acciones fijas abajo
+- Columna central: vista grande alternable entre imagen gris y mapa de calor
+- Columna derecha: métricas numéricas y botones de exportación
 
 **Lo memorable:** el header oscuro (#2C2C2A) con franja ámbar de 4px en el borde
 izquierdo, contrastando con el cuerpo claro de la ventana. Y la barra de color
@@ -156,9 +182,9 @@ header subtítulo → FONT_SUBTITLE, TEXT_SECONDARY sobre BG_HEADER
 
 ### Dimensiones
 ```
-Ventana mínima:  1100 × 680 px
-Ventana default: 1280 × 780 px
-Ventana.minsize(1100, 680)
+Ventana mínima:  1400 × 850 px
+Ventana default: 1600 × 950 px
+Ventana.minsize(1400, 850)
 Redimensionable: Sí — columna central crece (weight=1), laterales fijas
 ```
 
@@ -180,24 +206,16 @@ Redimensionable: Sí — columna central crece (weight=1), laterales fijas
 └──────────────────────────────────────────────────────────────────────┘
 ```
 
-### Área central (PanedWindow vertical o grid con rowconfigure)
+### Área central actual
 ```
 ┌─────────────────────────────────────────────────┐
-│  FILA SUPERIOR — 58% de altura                  │
-│  ┌──────────────────┬──────────────────────────┐│
-│  │ Imagen en grises │  Mapa de calor           ││
-│  │ (matplotlib)     │  (matplotlib + colorbar) ││
-│  │ cmap="gray"      │  cmap=CMAP_CUSTOM        ││
-│  └──────────────────┴──────────────────────────┘│
-│  Título flotante:                               │
-│  "IMAGEN CARGADA (escala de grises)"  izquierda │
-│  "MAPA DE CALOR — T(°C) · SOR · ω=X" derecha   │
-│  font=FONT_CAPTION, fg=TEXT_SECONDARY           │
+│  Barra superior: ← Imagen gris | Mapa de calor →│
 ├─────────────────────────────────────────────────┤
-│  FILA INFERIOR — 42% de altura                  │
-│  Gráfica convergencia — ancho completo          │
-│  Título: "CONVERGENCIA SOR — ERROR VS ITERS"    │
-│  font=FONT_CAPTION, fg=TEXT_SECONDARY           │
+│  FigureCanvasTkAgg grande                       │
+│  Modo 1: imagen en escala de grises             │
+│  Modo 2: mapa de calor con colorbar             │
+├─────────────────────────────────────────────────┤
+│  Barra inferior: pixel, temperatura, potencia   │
 └─────────────────────────────────────────────────┘
 ```
 
@@ -269,7 +287,7 @@ Frame(panel_izq, height=1, bg=BORDER).pack(fill=X, pady=12)
 
 # ── SECCIÓN 02 / PARÁMETROS ─────────────────────────────────
 # Patrón de campo (repetir para cada parámetro):
-#   Label(panel_izq, text="Tamaño de malla N×N",
+#   Label(panel_izq, text="Resolución detectada alto×ancho",
 #         font=FONT_LABEL_SM, fg=TEXT_SECONDARY, bg=BG_PANEL, anchor=W)
 #   Entry(panel_izq, font=FONT_MONO, bg=BG_INPUT, fg=TEXT_MONO,
 #         relief="flat", bd=0,
@@ -279,18 +297,16 @@ Frame(panel_izq, height=1, bg=BORDER).pack(fill=X, pady=12)
 #         highlightcolor=BORDER_FOCUS)  # #BA7517 al hacer foco
 
 # Campos en orden:
-#   "Tamaño de malla N×N"     default: "30"
-#   "Tolerancia ε"            default: "1e-6"
-#   "Máx. iteraciones"        default: "5000"
-#   "Factor ω  ∈ (0, 2)"     default: "1.81"   ← incluye slider debajo
+#   "Resolución detectada"    viene de la imagen cargada
+#   "Tolerancia ε"            default actual: "1e-4"
+#   "Máx. iteraciones"        default actual: "200"
+#   "Omega automático"        se muestra como label calculado tras ejecutar
 #   "Parámetro λ"             default: "1.0"
 #   "T_min (°C)"              default: "25"
 #   "T_max (°C)"              default: "75"
 
-# Slider para ω (debajo del entry, misma fila ancho):
-ttk.Scale(panel_izq, from_=0.01, to=1.99,
-          orient=HORIZONTAL, style="Thermal.TScale")
-# Sincronizar con entry_omega (ver sección 9)
+# Ya no hay slider de ω en la implementación actual.
+# El sistema calcula ω automáticamente y lo muestra como métrica.
 
 # Nota ámbar (para ω):
 Frame fondo ACCENT_SUBTLE → Label dentro:
@@ -684,7 +700,19 @@ ESTADO: ERROR VALIDACIÓN
   - Al corregir el campo: highlightbackground vuelve a BORDER
 ```
 
-### Sincronización slider ↔ entry de ω
+### Omega automático
+
+En la implementación actual no existe sincronización slider ↔ entry de `ω`.
+El valor se calcula en `metodos/sor.py`, se limita a `1.90` para estabilidad y
+se muestra como:
+
+```text
+Omega usado
+ω automático calculado
+```
+
+Referencia histórica reemplazada, mantener solo como contexto de versiones anteriores:
+
 ```python
 def _on_slider_change(self, val):
     omega = round(float(val), 3)
@@ -749,9 +777,9 @@ def _mostrar_resultado(self, resultado):
 - [ ] Eje Y de convergencia en escala logarítmica (`set_yscale("log")`)
 - [ ] Curva SOR en color `#BA7517` (ACCENT_DARK), linewidth=2
 - [ ] Línea de tolerancia en rojo punteado con label `ε = {valor}`
-- [ ] Slider ω sincronizado con Entry, clampeado a (0.01, 1.99)
+- [ ] Label de ω automático visible tras calcular
 - [ ] Botones exportar deshabilitados antes del primer cálculo
 - [ ] Status bar actualiza color del indicador según estado
 - [ ] Cálculo SOR en hilo separado con `threading.Thread`
-- [ ] `root.minsize(1100, 680)`
+- [ ] `root.minsize(1400, 850)`
 - [ ] Franja ámbar de 4px en borde izquierdo del header
